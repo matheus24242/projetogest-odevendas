@@ -1,0 +1,5 @@
+{
+  "name": "SyncSell Hub",
+  "description": "Um painel administrativo unificado para gerenciar vendas, produtos, clientes e estoque das lojas Shopee e Mercado Livre, com relatórios financeiros e dashboards de desempenho.",
+  "requestFramePermissions": []
+}

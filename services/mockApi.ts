@@ -143,16 +143,11 @@ export const getCurrentUserProfile = async () => {
 
 export const syncMercadoLivreOrders = async () => {
     // --- CREDENCIAIS DA APLICAÇÃO (ID do Aplicativo e Chave Secreta) ---
-    // Estes são os valores que você me forneceu.
     const meli_app_id = '3108943639564569';
     const meli_secret_key = 'dIqnc55gd8rMmRb6IXzxnQA068cd7YBb';
     // ---------------------------------------------------------------
 
     // --- DADOS NECESSÁRIOS PARA A API ---
-    // ATENÇÃO: A API de pedidos precisa de um "Access Token" e do seu "Seller ID" (ID de Vendedor).
-    // As credenciais acima são usadas para GERAR o Access Token, mas não são a mesma coisa.
-    // A sincronização só funcionará com os dados corretos.
-
     // 1. Access Token: Precisa ser gerado no painel do Mercado Livre. A "Chave Secreta" NÃO é o Access Token.
     const meli_access_token = meli_secret_key; // <-- SUBSTITUA pelo seu Access Token real.
 
@@ -164,84 +159,93 @@ export const syncMercadoLivreOrders = async () => {
         throw new Error('Credenciais do Mercado Livre não configuradas no código. Edite o arquivo services/mockApi.ts.');
     }
     
-    // PROXY PARA CONTORNAR O CORS
-    // O proxy anterior estava instável. Este novo deve resolver o erro "Failed to fetch".
     const proxyUrl = 'https://corsproxy.io/?';
     const apiUrl = `https://api.mercadolibre.com/orders/search?seller=${meli_seller_id}&sort=date_desc`;
+    const fullUrl = `${proxyUrl}${encodeURIComponent(apiUrl)}`;
 
-    const response = await fetch(`${proxyUrl}${encodeURIComponent(apiUrl)}`, {
-        headers: {
-            'Authorization': `Bearer ${meli_access_token}`
-        }
-    });
+    let response;
+    let responseText;
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `Erro HTTP ${response.status}: ${response.statusText}.`;
-        try {
-            const errorData = JSON.parse(errorText);
-            console.error('ML API Error:', errorData);
-            errorMessage = `Erro ao buscar pedidos do Mercado Livre: ${errorData.message || errorText}`;
-        } catch (e) {
-            console.error('ML API Error (not JSON):', errorText);
-            errorMessage = `Erro ao buscar pedidos do Mercado Livre. A resposta da API não foi um JSON válido. Detalhes: ${errorText || '(resposta vazia)'}`;
-        }
-        throw new Error(errorMessage);
-    }
-
-    const responseText = await response.text();
-    if (!responseText) {
-        console.warn("A API do Mercado Livre retornou uma resposta 200 OK, mas o corpo estava vazio.");
-        return { synced: 0 };
-    }
-    
-    let data;
     try {
-        data = JSON.parse(responseText);
-    } catch(e) {
-        console.error('Falha ao analisar a resposta bem-sucedida da API ML:', responseText);
-        throw new Error('A API do Mercado Livre retornou uma resposta que não pôde ser processada como JSON.');
-    }
+        response = await fetch(fullUrl, {
+            headers: {
+                'Authorization': `Bearer ${meli_access_token}`
+            }
+        });
+        
+        responseText = await response.text();
 
-    const ordersFromML = data.results || [];
+        if (!response.ok) {
+            let errorMessage = `Erro HTTP ${response.status}: ${response.statusText}.`;
+            try {
+                // Tenta analisar a resposta de erro, caso ela seja um JSON
+                const errorData = JSON.parse(responseText);
+                errorMessage += ` Mensagem da API: ${errorData.message || JSON.stringify(errorData)}`;
+            } catch (e) {
+                errorMessage += ` A resposta da API não foi um JSON válido. Conteúdo: "${responseText.substring(0, 200)}..."`;
+            }
 
-    if (ordersFromML.length === 0) {
-        return { synced: 0 };
-    }
-    
-    const mappedCustomers = ordersFromML.map((order: any) => ({
-        id: order.buyer.id.toString(),
-        name: order.buyer.nickname,
-        email: order.buyer.email,
-        phone: order.buyer.phone?.number || 'N/A',
-        address: 'N/A', 
-    }));
-    
-    const { error: customerError } = await supabase.from('customers').upsert(mappedCustomers, { onConflict: 'id' });
-    if (customerError) {
-        console.error("Error upserting customers:", customerError);
-        throw new Error('Falha ao sincronizar clientes.');
-    }
+            if (response.status === 401 || response.status === 403) {
+                errorMessage += " Este erro geralmente indica que o 'Access Token' está inválido ou expirou. Verifique as credenciais no arquivo services/mockApi.ts.";
+            }
 
-    const mappedOrders = ordersFromML.map((order: any) => ({
-        order_number: order.id.toString(),
-        platform: Platform.MercadoLivre,
-        customer_id: order.buyer.id.toString(),
-        total_value: order.total_amount,
-        status: order.status === 'paid' ? OrderStatus.Pago : order.status === 'shipped' ? OrderStatus.Enviado : OrderStatus.Pendente,
-        payment_method: PaymentMethod.Cartao, 
-        created_at: order.date_created,
-    }));
-    
-    const { error: orderError } = await supabase.from('orders').upsert(mappedOrders, { onConflict: 'order_number, platform' });
-
-    if (orderError) {
-        console.error("Error upserting orders:", orderError);
-        if(orderError.message.includes('constraint')) {
-             throw new Error('Falha ao sincronizar pedidos. Verifique se a tabela "orders" possui uma chave única combinando "order_number" e "platform".');
+            throw new Error(errorMessage);
         }
-        throw new Error('Falha ao sincronizar pedidos.');
-    }
 
-    return { synced: mappedOrders.length };
+        if (!responseText) {
+            console.warn("A API do Mercado Livre retornou uma resposta 200 OK, mas o corpo estava vazio.");
+            return { synced: 0 };
+        }
+
+        const data = JSON.parse(responseText);
+        const ordersFromML = data.results || [];
+
+        if (ordersFromML.length === 0) {
+            return { synced: 0 };
+        }
+        
+        const mappedCustomers = ordersFromML.map((order: any) => ({
+            id: order.buyer.id.toString(),
+            name: order.buyer.nickname,
+            email: order.buyer.email,
+            phone: order.buyer.phone?.number || 'N/A',
+            address: 'N/A', 
+        }));
+        
+        const { error: customerError } = await supabase.from('customers').upsert(mappedCustomers, { onConflict: 'id' });
+        if (customerError) {
+            console.error("Error upserting customers:", customerError);
+            throw new Error('Falha ao sincronizar clientes.');
+        }
+
+        const mappedOrders = ordersFromML.map((order: any) => ({
+            order_number: order.id.toString(),
+            platform: Platform.MercadoLivre,
+            customer_id: order.buyer.id.toString(),
+            total_value: order.total_amount,
+            status: order.status === 'paid' ? OrderStatus.Pago : order.status === 'shipped' ? OrderStatus.Enviado : OrderStatus.Pendente,
+            payment_method: PaymentMethod.Cartao, 
+            created_at: order.date_created,
+        }));
+        
+        const { error: orderError } = await supabase.from('orders').upsert(mappedOrders, { onConflict: 'order_number, platform' });
+
+        if (orderError) {
+            console.error("Error upserting orders:", orderError);
+            if(orderError.message.includes('constraint')) {
+                 throw new Error('Falha ao sincronizar pedidos. Verifique se a tabela "orders" possui uma chave única combinando "order_number" e "platform".');
+            }
+            throw new Error('Falha ao sincronizar pedidos.');
+        }
+
+        return { synced: mappedOrders.length };
+
+    } catch (error: any) {
+        if (error instanceof SyntaxError) {
+            console.error('Falha ao analisar JSON da API ML:', responseText);
+            throw new Error(`A resposta da API não é um JSON válido. Verifique as credenciais ou o proxy CORS. Resposta recebida: "${responseText?.substring(0, 200)}..."`);
+        }
+        // Re-lança outros erros (de rede ou os que criamos manualmente)
+        throw error;
+    }
 };

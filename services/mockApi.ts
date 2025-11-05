@@ -176,12 +176,33 @@ export const syncMercadoLivreOrders = async () => {
     });
 
     if (!response.ok) {
-        const errorData = await response.json();
-        console.error('ML API Error:', errorData);
-        throw new Error(`Erro ao buscar pedidos do Mercado Livre: ${errorData.message || 'Verifique as credenciais e tente novamente.'}`);
+        const errorText = await response.text();
+        let errorMessage = `Erro HTTP ${response.status}: ${response.statusText}.`;
+        try {
+            const errorData = JSON.parse(errorText);
+            console.error('ML API Error:', errorData);
+            errorMessage = `Erro ao buscar pedidos do Mercado Livre: ${errorData.message || errorText}`;
+        } catch (e) {
+            console.error('ML API Error (not JSON):', errorText);
+            errorMessage = `Erro ao buscar pedidos do Mercado Livre. A resposta da API não foi um JSON válido. Detalhes: ${errorText || '(resposta vazia)'}`;
+        }
+        throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    const responseText = await response.text();
+    if (!responseText) {
+        console.warn("A API do Mercado Livre retornou uma resposta 200 OK, mas o corpo estava vazio.");
+        return { synced: 0 };
+    }
+    
+    let data;
+    try {
+        data = JSON.parse(responseText);
+    } catch(e) {
+        console.error('Falha ao analisar a resposta bem-sucedida da API ML:', responseText);
+        throw new Error('A API do Mercado Livre retornou uma resposta que não pôde ser processada como JSON.');
+    }
+
     const ordersFromML = data.results || [];
 
     if (ordersFromML.length === 0) {

@@ -149,10 +149,10 @@ export const syncMercadoLivreOrders = async () => {
 
     // --- DADOS NECESSÁRIOS PARA A API ---
     // 1. Access Token: Precisa ser gerado no painel do Mercado Livre. A "Chave Secreta" NÃO é o Access Token.
-    const meli_access_token = meli_secret_key; // <-- SUBSTITUA pelo seu Access Token real.
+    const meli_access_token = dIqnc55gd8rMmRb6IXzxnQA068cd7YBb; // <-- SUBSTITUA pelo seu Access Token real.
 
     // 2. Seller ID: É o seu ID de VENDEDOR. O "ID do Aplicativo" NÃO é o Seller ID.
-    const meli_seller_id = meli_app_id; // <-- SUBSTITUA pelo seu Seller ID real.
+    const meli_seller_id = 3108943639564569; // <-- SUBSTITUA pelo seu Seller ID real.
     // --------------------------------------------------------------------
 
     if (!meli_access_token || !meli_seller_id) {
